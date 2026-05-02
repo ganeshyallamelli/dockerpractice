@@ -16,7 +16,7 @@ WHY + HOW CONTAINERS    →    REAL-WORLD PATTERNS     →    PRODUCTION MINDSET
 Mental model                 Volumes & persistence         Multi-stage builds
 Images & containers          Networking deep dive          Health checks
 First Dockerfile             Compose orchestration         Secrets & env hygiene
-LAN Counter Demo 🔥          Debugging live containers     Intro to Kubernetes
+🔥 Mission Control Demo      Debugging live containers     Intro to Kubernetes
 Push to Docker Hub           Logs & inspection             What comes after Docker
 ```
 
@@ -54,7 +54,7 @@ cd docker-masterclass
 - A real mental model of how Docker works
 - Confidence running, inspecting, and stopping containers
 - Their own Dockerfile, built and running
-- A LAN app that everyone in the room can hit from their phones
+- Deploy Mission Control — a live board where every person's container appears the moment they run it
 
 ---
 
@@ -257,29 +257,49 @@ This ordering makes rebuilds 10x faster.
 
 ---
 
-## Part 4 · LAN Demo — The Room's First Shared App  *(20 min)*
+## Part 4 · 🔥 Mission Control — Everyone Deploys Live  *(25 min)*
 
-> This is the moment that makes Docker real for everyone.
-> All their browsers and phones hitting one machine, one counter.
+> This is where the room stops watching and starts *doing*.
+> Each person runs their own container. The moment it starts, their name
+> appears on the big screen. When they stop it — they vanish.
+> Everyone contributes. Everyone sees the effect in real time.
+
+### The Idea
+
+- **You (host)** run Mission Control: a live board showing all agents on the network
+- **Each friend** runs an agent container with their own name and role as env vars
+- Their container **registers itself** with your board on startup
+- It sends a **heartbeat every 10s** to stay green
+- When they `docker stop` their container — they go **offline on the board**
+
+Every single Docker concept from this session gets used:
+env vars, port mapping, networking, named containers, `docker stop`, `docker ps`.
 
 ### The Architecture
+
 ```
-Friend's Phone / Laptop
-       |
-       v   http://YOUR_IP:3000/visits
- ─────────────────
- Your Laptop (Host)
- ─────────────────
-       |  port 3000
-       v
- ┌─────────────┐
- │  Node App   │ ---redis:6379---> ┌───────────┐
- │  Container  │                   │   Redis   │
- └─────────────┘                   │ Container │
-                                   └───────────┘
+┌─────────────────────────────────────────────────┐
+│              YOUR LAPTOP (Host)                 │
+│                                                 │
+│  ┌──────────────────────────────────────────┐   │
+│  │   Mission Control Container  :4000       │   │
+│  │   - Live board (auto-refreshes)          │   │
+│  │   - /register  /heartbeat  /agents       │   │
+│  └──────────────────────────────────────────┘   │
+│                     ▲  ▲  ▲                     │
+└─────────────────────│──│──│─────────────────────┘
+        register/heartbeat calls over LAN
+          │            │            │
+   ┌──────────┐  ┌──────────┐  ┌──────────┐
+   │ Arjun's  │  │ Sneha's  │  │ Rahul's  │
+   │ Laptop   │  │ Laptop   │  │ Laptop   │
+   │ agent    │  │ agent    │  │ agent    │
+   │ container│  │ container│  │ container│
+   └──────────┘  └──────────┘  └──────────┘
 ```
 
-### Step 1 — Find Your LAN IP
+### Step 1 — Host: Find Your LAN IP
+
 ```bash
 # macOS
 ipconfig getifaddr en0
@@ -287,88 +307,133 @@ ipconfig getifaddr en0
 # Linux
 hostname -I
 
-# Windows
+# Windows — look for IPv4 under Wi-Fi adapter
 ipconfig
-# Look for IPv4 Address under your Wi-Fi adapter
 ```
 
-### Step 2 — Update `server.js` with the Counter
+### Step 2 — Host: Start Mission Control
+
+The `mission-control/` folder is already in the workshop repo.
+
+```bash
+cd mission-control
+docker compose up --build -d
+```
+
+Open **http://localhost:4000** — you should see the empty board:
+> *"Waiting for agents to join the network..."*
+
+Share **http://YOUR_LAN_IP:4000** on the screen. This is what everyone will watch.
+
+### Step 3 — Everyone: Build the Agent Image
+
+Each person runs this on their own laptop:
+
+```bash
+cd mission-control/agent
+docker build -t my-agent .
+```
+
+Walk through the `agent/Dockerfile` together — this is the teaching moment:
+
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+COPY package*.json ./
+COPY agent.js .
+
+# These get overridden at runtime — this is how env vars work
+ENV AGENT_NAME="Agent"
+ENV AGENT_ROLE="Crew Member"
+ENV HOST_URL="http://host.docker.internal:4000"
+
+CMD ["node", "agent.js"]
+```
+
+> Point out: `host.docker.internal` is Docker's built-in DNS name that
+> resolves to the host machine from inside any container. Works on
+> Mac and Windows natively. Linux needs `--add-host` (shown below).
+
+### Step 4 — Everyone: Run Their Own Agent
+
+Each person picks their own name and role — anything they want:
+
+```bash
+# Mac / Windows
+docker run -d \
+  --name my-agent \
+  -e AGENT_NAME="Arjun" \
+  -e AGENT_ROLE="Backend Wizard" \
+  my-agent
+
+# Linux (needs explicit host mapping)
+docker run -d \
+  --name my-agent \
+  --add-host=host.docker.internal:host-gateway \
+  -e AGENT_NAME="Sneha" \
+  -e AGENT_ROLE="DevOps Queen" \
+  my-agent
+```
+
+**Watch the board.** Their card appears within seconds. Green. Online.
+
+### Step 5 — Play With It (This Is the Point)
+
+Now have everyone experiment — they already know these commands from Part 2:
+
+```bash
+# Stop your container — watch yourself go grey on the board
+docker stop my-agent
+
+# Start it again — watch yourself come back online
+docker start my-agent
+
+# Check your logs — see the heartbeats
+docker logs -f my-agent
+
+# See everyone's containers
+docker ps
+
+# Change your role — rebuild with a different env var
+docker rm my-agent
+docker run -d --name my-agent -e AGENT_NAME="Arjun" -e AGENT_ROLE="K8s Ninja" my-agent
+```
+
+### What They're Learning Without Realising It
+
+| Action | Concept reinforced |
+|--------|-------------------|
+| `-e AGENT_NAME="..."` | Environment variables |
+| `docker stop` → goes grey | Container lifecycle |
+| `docker start` → comes back | Containers are not destroyed by stop |
+| `docker logs -f` | Log tailing |
+| `host.docker.internal` | Container-to-host networking |
+| Heartbeat every 10s | How real health systems work |
+| Board auto-refreshes | Stateless API + polling pattern |
+
+### The Agent Code (Walk Through Together)
+
+`agent/agent.js` — pure Node.js, zero dependencies:
+
 ```javascript
-const express = require("express");
-const redis = require("redis");
+const AGENT_NAME = process.env.AGENT_NAME || "Agent";
+const AGENT_ROLE = process.env.AGENT_ROLE || "Crew Member";
+const HOST_URL   = process.env.HOST_URL   || "http://host.docker.internal:4000";
 
-const app = express();
+// On startup: POST /register  →  appear on the board
+// Every 10s:  POST /heartbeat →  stay green
+// On SIGTERM: POST /deregister → go offline cleanly when docker stop runs
 
-const client = redis.createClient({ url: "redis://redis:6379" });
-client.connect();
-
-app.get("/", (req, res) => {
-  res.send(`<h1>Hello!</h1><p><a href="/visits">See the counter</a></p>`);
+process.on("SIGTERM", async () => {
+  await post("/deregister", { name: AGENT_NAME });
+  process.exit(0);
 });
-
-app.get("/visits", async (req, res) => {
-  const visits = await client.incr("counter");
-  res.send(`
-    <html>
-      <head><meta http-equiv="refresh" content="2"></head>
-      <body style="font-family:sans-serif;text-align:center;padding:50px">
-        <h1>🐳 LAN Visit Counter</h1>
-        <h2 style="font-size:80px;color:#0db7ed">${visits}</h2>
-        <p>Everyone in the room is hitting this counter!</p>
-      </body>
-    </html>
-  `);
-});
-
-app.get("/health", (req, res) => res.json({ status: "ok" }));
-
-app.listen(3000, "0.0.0.0", () => console.log("Running on :3000"));
 ```
 
-Update `package.json`:
-```json
-{
-  "dependencies": {
-    "express": "^4.18.0",
-    "redis": "^4.6.0"
-  }
-}
-```
-
-### Step 3 — Create a Docker Network
-```bash
-# Containers on the same network can reach each other by service name
-docker network create workshop-net
-```
-
-### Step 4 — Run Redis
-```bash
-docker run -d \
-  --name redis \
-  --network workshop-net \
-  redis:alpine
-```
-
-### Step 5 — Build & Run the App
-```bash
-docker build -t docker-lan-app .
-
-docker run -d \
-  --name app \
-  --network workshop-net \
-  -p 3000:3000 \
-  docker-lan-app
-```
-
-### Step 6 — Share Your IP With the Room
-```
-Everyone opens:  http://YOUR_LAN_IP:3000/visits
-```
-
-Watch the counter climb in real time as everyone opens it on their phones.
-
-> Point out: the Node app reaches Redis using the hostname `redis` —
-> that's the **container name**, not localhost. This is Docker networking.
+> Key insight: `SIGTERM` is the signal Docker sends when you run `docker stop`.
+> Well-behaved containers catch it and clean up. This is how graceful shutdown works —
+> a concept that matters enormously in production and Kubernetes.
 
 ---
 
@@ -379,15 +444,21 @@ Watch the counter climb in real time as everyone opens it on their phones.
 
 docker login
 
-# Tag your image with your username
-docker tag docker-lan-app YOUR_USERNAME/docker-lan-app:v1
+# Tag the agent image you just built with your Docker Hub username
+docker tag my-agent YOUR_USERNAME/docker-agent:v1
 
 # Push it
-docker push YOUR_USERNAME/docker-lan-app:v1
+docker push YOUR_USERNAME/docker-agent:v1
 
-# Now anyone in the world can run your app:
-docker run -p 3000:3000 YOUR_USERNAME/docker-lan-app:v1
+# Anyone on any machine can now run your agent:
+docker run -d \
+  -e AGENT_NAME="Arjun" \
+  -e AGENT_ROLE="Remote Agent" \
+  YOUR_USERNAME/docker-agent:v1
 ```
+
+> This is the full loop: write code → Dockerfile → build image → push to registry → run anywhere.
+> The same loop used in every production CI/CD pipeline in the world.
 
 ---
 
@@ -400,8 +471,11 @@ docker run -p 3000:3000 YOUR_USERNAME/docker-lan-app:v1
 | Running containers | yes |
 | Writing a Dockerfile | yes |
 | Layer caching | yes |
-| Docker networking basics | yes |
-| LAN sharing a live app | yes |
+| Env vars at runtime (`-e`) | yes |
+| Container lifecycle (stop/start/rm) | yes |
+| Container-to-host networking | yes |
+| SIGTERM + graceful shutdown | yes |
+| Mission Control — everyone deployed live | yes |
 | Pushing to Docker Hub | yes |
 
 **Homework before Session 2:**
@@ -429,15 +503,15 @@ docker run -p 3000:3000 YOUR_USERNAME/docker-lan-app:v1
 ### The Problem With Session 1's Approach
 
 ```bash
-# Manual, fragile, 6 commands to remember:
+# Session 1 — we ran Mission Control like this:
 docker network create workshop-net
 docker run -d --name redis --network workshop-net redis:alpine
-docker build -t docker-lan-app .
-docker run -d --name app --network workshop-net -p 3000:3000 docker-lan-app
+docker build -t my-agent .
+docker run -d --name my-agent --network workshop-net -p 4000:4000 my-agent
 # ...and teardown is another 4 commands
 ```
 
-Compose replaces all of that with **one file + one command**.
+Works — but imagine doing this for 5 services. Compose replaces all of that with **one file + one command**.
 
 ### The Upgrade — Full Stack with Nginx
 
@@ -502,8 +576,8 @@ server {
 ```bash
 docker compose up --build           # Build + start everything
 
-# LAN URL is now clean — no port number needed!
-# http://YOUR_LAN_IP/visits
+# Mission Control board — clean URL, no port number!
+# http://YOUR_LAN_IP/
 ```
 
 ### Docker Compose Cheat Sheet
@@ -560,13 +634,14 @@ services:
 ```bash
 docker compose up -d
 
-# Hit /visits a few times — counter reaches, say, 12
+# Have a few people register their agents — board shows 5 agents
 
-docker compose down          # Stop everything
+docker compose down          # Stop everything — board goes down
 
 docker compose up -d         # Start again
 
-# Visit /visits — counter is STILL at 12
+# Board comes back — all previously registered agents still in state
+# This is what named volumes do: data outlives the container
 ```
 
 ### Dev Mode — Hot Reload With Bind Mounts
@@ -1116,22 +1191,43 @@ CLEANUP
 
 ---
 
-## LAN Demo Quick-Start  *(for the host)*
+## Mission Control Quick-Start  *(for the host)*
 
 ```bash
-# 1. Find your IP
+# 1. Find your LAN IP
 ipconfig getifaddr en0     # macOS
 hostname -I                # Linux
 
-# 2. Start the full stack
-cd docker-masterclass
+# 2. Start Mission Control
+cd mission-control
 docker compose up --build -d
 
-# 3. Share this URL with everyone in the room
-http://YOUR_IP/visits
+# 3. Open the board locally
+http://localhost:4000
 
-# 4. Watch the counter climb in real time
-docker compose logs -f app
+# 4. Share this with the room — they watch here
+http://YOUR_LAN_IP:4000
+
+# 5. Each person runs their agent (on their own laptop)
+docker build -t my-agent ./agent
+
+# Mac/Windows:
+docker run -d --name my-agent \
+  -e AGENT_NAME="YourName" \
+  -e AGENT_ROLE="YourRole" \
+  -e HOST_URL="http://YOUR_LAN_IP:4000" \
+  my-agent
+
+# Linux:
+docker run -d --name my-agent \
+  --add-host=host.docker.internal:host-gateway \
+  -e AGENT_NAME="YourName" \
+  -e AGENT_ROLE="YourRole" \
+  -e HOST_URL="http://YOUR_LAN_IP:4000" \
+  my-agent
+
+# 6. Watch everyone appear on the board in real time
+docker compose logs -f
 ```
 
 ---
