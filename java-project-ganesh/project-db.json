@@ -1,0 +1,8 @@
+{
+  "projectName": "AI Native Observability",
+  "projectDescription": "AI-driven observability for modern systems.",
+  "members": [
+    {"id":1,"name":"Ganesh","role":"Developer"},
+    {"id":2,"name":"Sarath","role":"Developer"}
+  ]
+}
